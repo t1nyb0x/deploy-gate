@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/t1nyb0x/deploy-gate/internal/config"
+	"github.com/t1nyb0x/deploy-gate/internal/deploy"
 	"github.com/t1nyb0x/deploy-gate/internal/webhook"
 )
 
@@ -30,8 +31,11 @@ func main() {
 	mux := http.NewServeMux()
 
 	for _, route := range cfg.Routes {
-		log.Printf("register route: path=%s script=%s", route.Path, route.Script)
-		mux.HandleFunc(route.Path, webhook.Deploy(secret, route.Script))
+		log.Printf("register route: path=%s script=%s branch=%s", route.Path, route.Script, route.Branch)
+		if route.Branch == "" {
+			log.Printf("warning: route %s has no branch; pushes to any branch will deploy", route.Path)
+		}
+		mux.HandleFunc(route.Path, webhook.Deploy(secret, route, deploy.Run))
 	}
 
 	server := &http.Server{

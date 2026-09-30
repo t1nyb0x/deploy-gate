@@ -2,7 +2,8 @@
   "routes": [
     {
       "path": "/deploy/example",
-      "script": "/scripts/deploy-example.sh"
+      "script": "/scripts/deploy-example.sh",
+      "branch": "main"
     }
   ]
 }

@@ -69,11 +69,13 @@ DEPLOY_CONFIG=/etc/deploy-gate/config.json
   "routes": [
     {
       "path": "/deploy/bot",
-      "script": "/opt/deploy-gate/scripts/deploy-bot.sh"
+      "script": "/opt/deploy-gate/scripts/deploy-bot.sh",
+      "branch": "main"
     },
     {
       "path": "/deploy/dashboard",
-      "script": "/opt/deploy-gate/scripts/deploy-dashboard.sh"
+      "script": "/opt/deploy-gate/scripts/deploy-dashboard.sh",
+      "branch": "main"
     }
   ]
 }
@@ -82,6 +84,14 @@ DEPLOY_CONFIG=/etc/deploy-gate/config.json
 各ルートで、HTTPパスと実行するローカルスクリプトを対応付けます。
 
 スクリプトのパスは絶対パスで指定する必要があります。
+
+| フィールド | 必須 | 説明                                                                              |
+| ---------- | ---- | --------------------------------------------------------------------------------- |
+| `path`     | ○    | Webhookを受け付けるHTTPパス。`/` で始める                                         |
+| `script`   | ○    | 実行するスクリプトの絶対パス                                                      |
+| `branch`   |      | このブランチへのpushのみデプロイする（例: `main`）。省略時は全ブランチでデプロイ |
+
+`branch` の指定を強く推奨します。値はブランチ名のみを指定してください（`refs/heads/main` ではなく `main`）。`refs/` で始まる値は起動時にエラーになります。デプロイされるのは `push` イベントのみです。`ping` やその他のイベントは受け付けますが無視し、ブランチ削除のpushも常に無視します。
 
 ## ビルド
 
@@ -159,7 +169,8 @@ config.json の例:
   "routes": [
     {
       "path": "/deploy/example",
-      "script": "/scripts/deploy-example.sh"
+      "script": "/scripts/deploy-example.sh",
+      "branch": "main"
     }
   ]
 }
@@ -190,11 +201,14 @@ X-Hub-Signature-256: sha256=<signature>
 
 レスポンス:
 
-| Status | Description                |
-| ------ | -------------------------- |
-| 204    | スクリプト実行成功         |
-| 403    | メソッド不正または署名不正 |
-| 500    | スクリプト実行失敗         |
+| Status | Description                                                           |
+| ------ | --------------------------------------------------------------------- |
+| 202    | 受付済み。スクリプトはバックグラウンドで実行（`{"status":"accepted"}`） |
+| 200    | `ping`（`{"status":"pong"}`）、または対象外のイベント・ブランチ（`{"status":"ignored"}`） |
+| 400    | pushペイロードが不正                                                  |
+| 403    | メソッド不正または署名不正                                            |
+
+スクリプトの実行結果はレスポンスではなくサーバーログに出力されます。
 
 ## プロジェクト構成
 
