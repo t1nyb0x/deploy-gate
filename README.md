@@ -8,6 +8,10 @@ A small Go-based webhook server for safely triggering local deployment scripts f
 
 - GitHub HMAC-SHA256 signature verification
 - Path-based deployment routing
+- Deploys only on `push` events, optionally limited to a branch
+- Serialized deploys per script, with queued requests coalesced into one run
+- Graceful shutdown that waits for running deploys
+- Keeps the webhook secret out of scripts and logs
 - Configurable script execution
 - Single binary deployment
 - Uses only the Go standard library
@@ -31,7 +35,8 @@ GitHub Webhook
 1. Receiving webhook requests
 2. Verifying GitHub signatures
 3. Selecting a configured route
-4. Executing the configured script
+4. Filtering by event type and branch
+5. Executing the configured script, one run at a time per script
 
 Actual deployment logic should be implemented in the script invoked by each route.
 
@@ -40,7 +45,7 @@ Actual deployment logic should be implemented in the script invoked by each rout
 - Linux
 - GitHub Webhooks
 
-Go is only required when building from source. Prebuilt binaries can be distributed through GitHub Releases.
+Go 1.27 or later is only required when building from source. Prebuilt binaries can be distributed through GitHub Releases.
 
 ## Configuration
 
@@ -94,6 +99,19 @@ The script path must be an absolute path.
 | `branch` | No       | Only deploy on pushes to this branch (e.g. `main`). If omitted, pushes to any branch trigger a deploy |
 
 Setting `branch` is strongly recommended. Specify the branch name only (`main`, not `refs/heads/main`); a value starting with `refs/` is rejected at startup. Only `push` events trigger a deploy; `ping` and other events are acknowledged but ignored, and branch deletions are always ignored.
+
+## GitHub Webhook settings
+
+Configure the webhook in your repository under **Settings > Webhooks**:
+
+| Setting      | Value                                                                  |
+| ------------ | ---------------------------------------------------------------------- |
+| Payload URL  | `https://<your-host>/<route path>` (e.g. `https://example.com/deploy/bot`) |
+| Content type | `application/json` or `application/x-www-form-urlencoded` (both supported) |
+| Secret       | Same value as `DEPLOY_SECRET`                                          |
+| Events       | **Just the push event** is recommended                                 |
+
+After saving, GitHub sends a `ping` event. A `200` response with `{"status":"pong"}` confirms that the signature is valid.
 
 ## Build
 
@@ -160,6 +178,8 @@ services:
     environment:
       DEPLOY_SECRET: ${DEPLOY_SECRET}
       DEPLOY_CONFIG: /etc/deploy-gate/config.json
+      DEPLOY_SHUTDOWN_TIMEOUT: ${DEPLOY_SHUTDOWN_TIMEOUT:-30s}
+      DEPLOY_LOG_OUTPUT_BYTES: ${DEPLOY_LOG_OUTPUT_BYTES:-4096}
 
     volumes:
       - ./config.json:/etc/deploy-gate/config.json:ro
@@ -218,8 +238,13 @@ Responses:
 | 200    | `ping` (`{"status":"pong"}`) or ignored event/branch (`{"status":"ignored"}`) |
 | 400    | Malformed push payload                                           |
 | 403    | Invalid method or signature                                      |
+| 503    | Shutting down; no new deploys are accepted                       |
 
 The script result is written to the server log, not returned in the response.
+
+### Concurrency
+
+Each script runs at most one at a time, even when several routes point to the same script. Requests that arrive while a deploy is running are coalesced into a single follow-up run, so the latest push is always deployed without piling up runs.
 
 ### Script output and secrets
 
@@ -229,8 +254,6 @@ The script result is written to the server log, not returned in the response.
 - Each output line is logged with a `[<script name>]` prefix
 
 Other secrets used by your scripts (tokens, passwords, etc.) are not redacted. Avoid printing them, and avoid `set -x` in scripts that handle them.
-
-Each script runs at most one at a time, even when several routes point to the same script. Requests that arrive while a deploy is running are coalesced into a single follow-up run, so the latest push is always deployed without piling up runs.
 
 ## Graceful Shutdown
 
@@ -249,21 +272,33 @@ Make sure the process manager waits longer than `DEPLOY_SHUTDOWN_TIMEOUT` before
 
 ```text
 deploy-gate/
+├── .github/workflows/
+│   ├── test.yml          # gofmt, vet, tests, coverage
+│   ├── push-image.yml    # Publish image to GHCR
+│   └── release.yml       # Build release binary on tags
 ├── cmd/
 │   └── deploy-gate/
-│       └── main.go
+│       └── main.go       # Startup, signal handling, graceful shutdown
 ├── internal/
 │   ├── config/
-│   │   └── config.go
+│   │   └── config.go     # Config file loading and validation
 │   ├── deploy/
-│   │   └── run.go
+│   │   ├── run.go        # Script execution (process group, output limit, redaction)
+│   │   ├── serial.go     # Per-script serialization and shutdown
+│   │   └── logoutput.go  # Script output logging
 │   ├── signature/
-│   │   └── hmac.go
+│   │   └── hmac.go       # Webhook signature verification
 │   └── webhook/
-│       └── deploy.go
-├── go.mod
-└── README.md
+│       └── deploy.go     # Webhook handler (event and branch filtering)
+├── scripts/
+│   └── deploy-example.sh.example
+├── Dockerfile
+├── compose.yml.example
+├── config.json.example
+└── go.mod
 ```
+
+Each package has `_test.go` files next to it.
 
 ## Security
 

@@ -8,6 +8,10 @@ GitHub Webhookから安全にローカルのデプロイスクリプトを実行
 
 - GitHub HMAC-SHA256署名検証
 - パスごとのデプロイルーティング
+- `push` イベントのみデプロイ。対象ブランチの指定も可能
+- スクリプトごとに直列実行し、実行中のリクエストは再実行1回にまとめる
+- 実行中のデプロイを待つグレースフルシャットダウン
+- Webhookのシークレットをスクリプトとログから保護
 - 設定ファイルによるスクリプト指定
 - 単一バイナリで動作
 - 標準ライブラリのみ使用
@@ -31,7 +35,8 @@ GitHub Webhook
 1. Webhookを受信する
 2. GitHub署名を検証する
 3. 設定済みのルートを選択する
-4. 対応するスクリプトを実行する
+4. イベント種別とブランチで絞り込む
+5. 対応するスクリプトを実行する（スクリプトごとに同時に1本まで）
 
 実際のデプロイ処理は、各ルートに設定したスクリプト側で実装します。
 
@@ -40,7 +45,7 @@ GitHub Webhook
 - Linux
 - GitHub Webhook
 
-Goはソースからビルドする場合のみ必要です。ビルド済みバイナリを使用する場合、実行環境にGoは不要です。
+Go（1.27以上）はソースからビルドする場合のみ必要です。ビルド済みバイナリを使用する場合、実行環境にGoは不要です。
 
 ## 設定
 
@@ -94,6 +99,19 @@ DEPLOY_CONFIG=/etc/deploy-gate/config.json
 | `branch`   |      | このブランチへのpushのみデプロイする（例: `main`）。省略時は全ブランチでデプロイ |
 
 `branch` の指定を強く推奨します。値はブランチ名のみを指定してください（`refs/heads/main` ではなく `main`）。`refs/` で始まる値は起動時にエラーになります。デプロイされるのは `push` イベントのみです。`ping` やその他のイベントは受け付けますが無視し、ブランチ削除のpushも常に無視します。
+
+## GitHub Webhookの設定
+
+リポジトリの **Settings > Webhooks** で以下のように設定します。
+
+| 項目         | 値                                                                          |
+| ------------ | --------------------------------------------------------------------------- |
+| Payload URL  | `https://<ホスト>/<ルートのパス>`（例: `https://example.com/deploy/bot`）   |
+| Content type | `application/json` または `application/x-www-form-urlencoded`（どちらも対応） |
+| Secret       | `DEPLOY_SECRET` と同じ値                                                    |
+| イベント     | **Just the push event** を推奨                                              |
+
+保存するとGitHubから `ping` イベントが送信されます。`200` と `{"status":"pong"}` が返れば、署名の設定は正しく行われています。
 
 ## ビルド
 
@@ -160,6 +178,8 @@ services:
     environment:
       DEPLOY_SECRET: ${DEPLOY_SECRET}
       DEPLOY_CONFIG: /etc/deploy-gate/config.json
+      DEPLOY_SHUTDOWN_TIMEOUT: ${DEPLOY_SHUTDOWN_TIMEOUT:-30s}
+      DEPLOY_LOG_OUTPUT_BYTES: ${DEPLOY_LOG_OUTPUT_BYTES:-4096}
 
     volumes:
       - ./config.json:/etc/deploy-gate/config.json:ro
@@ -218,8 +238,13 @@ X-Hub-Signature-256: sha256=<signature>
 | 200    | `ping`（`{"status":"pong"}`）、または対象外のイベント・ブランチ（`{"status":"ignored"}`） |
 | 400    | pushペイロードが不正                                                  |
 | 403    | メソッド不正または署名不正                                            |
+| 503    | 停止処理中のため、新しいデプロイを受け付けない                        |
 
 スクリプトの実行結果はレスポンスではなくサーバーログに出力されます。
+
+### 同時実行
+
+同じスクリプトが同時に実行されることはありません（複数のルートが同じスクリプトを指している場合も同様です）。実行中に届いたリクエストは、終了後の再実行1回にまとめられます。実行が積み上がることはなく、最新のpushは必ずデプロイされます。
 
 ### スクリプトの出力とシークレット
 
@@ -229,8 +254,6 @@ X-Hub-Signature-256: sha256=<signature>
 - 出力は1行ずつ、`[<スクリプト名>]` を付けてログに出力します
 
 スクリプト内で使用するその他のシークレット（トークン、パスワードなど）は伏せ字にしません。出力しないようにし、それらを扱うスクリプトでは `set -x` を使わないでください。
-
-同じスクリプトが同時に実行されることはありません（複数のルートが同じスクリプトを指している場合も同様です）。実行中に届いたリクエストは、終了後の再実行1回にまとめられます。実行が積み上がることはなく、最新のpushは必ずデプロイされます。
 
 ## グレースフルシャットダウン
 
@@ -249,21 +272,33 @@ X-Hub-Signature-256: sha256=<signature>
 
 ```text
 deploy-gate/
+├── .github/workflows/
+│   ├── test.yml          # gofmt、vet、テスト、カバレッジ
+│   ├── push-image.yml    # GHCRへのイメージ公開
+│   └── release.yml       # タグ作成時のリリースバイナリ作成
 ├── cmd/
 │   └── deploy-gate/
-│       └── main.go
+│       └── main.go       # 起動、シグナル処理、グレースフルシャットダウン
 ├── internal/
 │   ├── config/
-│   │   └── config.go
+│   │   └── config.go     # 設定ファイルの読み込みと検証
 │   ├── deploy/
-│   │   └── run.go
+│   │   ├── run.go        # スクリプト実行（プロセスグループ、出力上限、伏せ字化）
+│   │   ├── serial.go     # スクリプトごとの直列実行と停止処理
+│   │   └── logoutput.go  # スクリプト出力のログ出力
 │   ├── signature/
-│   │   └── hmac.go
+│   │   └── hmac.go       # Webhook署名の検証
 │   └── webhook/
-│       └── deploy.go
-├── go.mod
-└── README.md
+│       └── deploy.go     # Webhookハンドラー（イベント・ブランチの絞り込み）
+├── scripts/
+│   └── deploy-example.sh.example
+├── Dockerfile
+├── compose.yml.example
+├── config.json.example
+└── go.mod
 ```
+
+各パッケージには `_test.go` を同じディレクトリに置いています。
 
 ## セキュリティ
 

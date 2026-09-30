@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -251,5 +252,118 @@ func TestDeployUnavailableWhenShuttingDown(t *testing.T) {
 
 	if res.Code != http.StatusServiceUnavailable {
 		t.Fatalf("code = %d, want %d", res.Code, http.StatusServiceUnavailable)
+	}
+}
+
+// formBody encodes a JSON payload the way GitHub does for the
+// application/x-www-form-urlencoded content type (the GitHub default).
+func formBody(payload string) []byte {
+	return []byte(url.Values{"payload": {payload}}.Encode())
+}
+
+func TestDeployContentTypes(t *testing.T) {
+	route := config.Route{Path: "/deploy/test", Script: "/scripts/test.sh", Branch: "main"}
+
+	tests := []struct {
+		name        string
+		contentType string
+		body        []byte
+		wantCode    int
+		wantStatus  string
+		wantDeploy  bool
+	}{
+		{
+			name:        "json push deploys",
+			contentType: "application/json",
+			body:        []byte(`{"ref":"refs/heads/main"}`),
+			wantCode:    http.StatusAccepted,
+			wantStatus:  "accepted",
+			wantDeploy:  true,
+		},
+		{
+			name:        "form push deploys",
+			contentType: "application/x-www-form-urlencoded",
+			body:        formBody(`{"ref":"refs/heads/main"}`),
+			wantCode:    http.StatusAccepted,
+			wantStatus:  "accepted",
+			wantDeploy:  true,
+		},
+		{
+			name:        "form content type with parameters",
+			contentType: "application/x-www-form-urlencoded; charset=utf-8",
+			body:        formBody(`{"ref":"refs/heads/main"}`),
+			wantCode:    http.StatusAccepted,
+			wantStatus:  "accepted",
+			wantDeploy:  true,
+		},
+		{
+			name:        "form push to other branch is ignored",
+			contentType: "application/x-www-form-urlencoded",
+			body:        formBody(`{"ref":"refs/heads/feature/x"}`),
+			wantCode:    http.StatusOK,
+			wantStatus:  "ignored",
+		},
+		{
+			name:        "form branch deletion is ignored",
+			contentType: "application/x-www-form-urlencoded",
+			body:        formBody(`{"ref":"refs/heads/main","deleted":true}`),
+			wantCode:    http.StatusOK,
+			wantStatus:  "ignored",
+		},
+		{
+			name:        "form without payload field is rejected",
+			contentType: "application/x-www-form-urlencoded",
+			body:        []byte(`foo=bar`),
+			wantCode:    http.StatusBadRequest,
+		},
+		{
+			name:        "form with malformed payload is rejected",
+			contentType: "application/x-www-form-urlencoded",
+			body:        formBody(`not json`),
+			wantCode:    http.StatusBadRequest,
+		},
+		{
+			name:        "missing content type is treated as json",
+			contentType: "",
+			body:        []byte(`{"ref":"refs/heads/main"}`),
+			wantCode:    http.StatusAccepted,
+			wantStatus:  "accepted",
+			wantDeploy:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := &fakeDeployer{}
+			req := httptest.NewRequest(http.MethodPost, route.Path, strings.NewReader(string(tt.body)))
+			req.Header.Set("X-GitHub-Event", "push")
+			req.Header.Set("X-Hub-Signature-256", sign(tt.body))
+			if tt.contentType != "" {
+				req.Header.Set("Content-Type", tt.contentType)
+			}
+			rec := httptest.NewRecorder()
+
+			Deploy(testSecret, route, d)(rec, req)
+
+			if rec.Code != tt.wantCode {
+				t.Fatalf("code = %d, want %d (body=%q)", rec.Code, tt.wantCode, rec.Body.String())
+			}
+			if tt.wantStatus != "" {
+				var resp deployResponse
+				if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+					t.Fatalf("decode response: %v", err)
+				}
+				if resp.Status != tt.wantStatus {
+					t.Errorf("status = %q, want %q", resp.Status, tt.wantStatus)
+				}
+			}
+			wantCalls := 0
+			if tt.wantDeploy {
+				wantCalls = 1
+			}
+			if d.calls != wantCalls {
+				t.Errorf("deploy triggered %d times, want %d", d.calls, wantCalls)
+			}
+		})
 	}
 }

@@ -2,9 +2,13 @@ package webhook
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"log"
+	"mime"
 	"net/http"
+	"net/url"
 
 	"github.com/t1nyb0x/deploy-gate/internal/config"
 	"github.com/t1nyb0x/deploy-gate/internal/signature"
@@ -26,6 +30,28 @@ type deployResponse struct {
 type pushPayload struct {
 	Ref     string `json:"ref"`
 	Deleted bool   `json:"deleted"`
+}
+
+// parsePushPayload decodes a push payload sent as either application/json or
+// application/x-www-form-urlencoded (GitHub's default), where the JSON is in the "payload" field.
+func parsePushPayload(contentType string, body []byte) (pushPayload, error) {
+	raw := body
+	if mediaType, _, _ := mime.ParseMediaType(contentType); mediaType == "application/x-www-form-urlencoded" {
+		values, err := url.ParseQuery(string(body))
+		if err != nil {
+			return pushPayload{}, fmt.Errorf("parse form: %w", err)
+		}
+		if !values.Has("payload") {
+			return pushPayload{}, errors.New("form has no payload field")
+		}
+		raw = []byte(values.Get("payload"))
+	}
+
+	var payload pushPayload
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return pushPayload{}, fmt.Errorf("decode payload: %w", err)
+	}
+	return payload, nil
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
@@ -67,8 +93,9 @@ func Deploy(secret string, route config.Route, d Deployer) http.HandlerFunc {
 			return
 		}
 
-		var payload pushPayload
-		if err := json.Unmarshal(body, &payload); err != nil {
+		payload, err := parsePushPayload(r.Header.Get("Content-Type"), body)
+		if err != nil {
+			log.Printf("bad request: path=%s error=%v", route.Path, err)
 			http.Error(w, "bad request", http.StatusBadRequest)
 			return
 		}
