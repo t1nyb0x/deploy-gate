@@ -52,6 +52,7 @@ Goはソースからビルドする場合のみ必要です。ビルド済みバ
 | --------------- | ---- | ---------------------- |
 | `DEPLOY_SECRET` | ○    | GitHub Webhook Secret  |
 | `DEPLOY_CONFIG` | ○    | JSON設定ファイルのパス |
+| `DEPLOY_SHUTDOWN_TIMEOUT` |  | 停止時に実行中のデプロイを待つ最大時間（Goのduration形式。例: `2m`）。デフォルト: `30s` |
 
 例:
 
@@ -123,6 +124,11 @@ Environment=DEPLOY_CONFIG=/etc/deploy-gate/config.json
 ExecStart=/usr/local/bin/deploy-gate
 Restart=always
 RestartSec=3
+# SIGTERMをdeploy-gate本体にのみ送り、実行中のデプロイを待てるようにする。
+# デフォルト（control-group）ではデプロイスクリプトも即座に終了してしまう。
+KillMode=mixed
+# DEPLOY_SHUTDOWN_TIMEOUT より長くする
+TimeoutStopSec=60
 
 [Install]
 WantedBy=multi-user.target
@@ -160,6 +166,9 @@ services:
 
     ports:
       - "9000:9000"
+
+    # DEPLOY_SHUTDOWN_TIMEOUT より長くする（Dockerのデフォルトは10s）
+    stop_grace_period: 60s
 ```
 
 config.json の例:
@@ -212,6 +221,19 @@ X-Hub-Signature-256: sha256=<signature>
 スクリプトの実行結果はレスポンスではなくサーバーログに出力されます。
 
 同じスクリプトが同時に実行されることはありません（複数のルートが同じスクリプトを指している場合も同様です）。実行中に届いたリクエストは、終了後の再実行1回にまとめられます。実行が積み上がることはなく、最新のpushは必ずデプロイされます。
+
+## グレースフルシャットダウン
+
+`SIGTERM` または `SIGINT` を受け取ると、`deploy-gate` は以下の順に停止します。
+
+1. 新しいWebhookリクエストの受け付けを停止する
+2. 予約済みの再実行を破棄する（警告ログを出力）
+3. 実行中のデプロイの完了を `DEPLOY_SHUTDOWN_TIMEOUT` まで待つ
+4. タイムアウト後も実行中のデプロイは、子プロセスごと強制終了する
+
+スクリプトは独立したプロセスグループで実行されるため、スクリプトから起動した子プロセス（`docker compose` など）もまとめて終了します。
+
+プロセスマネージャーが強制終了するまでの待ち時間は、`DEPLOY_SHUTDOWN_TIMEOUT` より長く設定してください（systemdは `TimeoutStopSec`、Docker Composeは `stop_grace_period`）。systemdでは上記の例のとおり `KillMode=mixed` を設定してください。
 
 ## プロジェクト構成
 

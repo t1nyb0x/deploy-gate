@@ -13,9 +13,9 @@ import (
 const maxBodySize = 1 << 20 // 1MB
 
 // Deployer starts a deploy. Trigger reports whether the request was queued
-// behind a deploy already in progress.
+// behind a deploy already in progress, or an error if deploys are no longer accepted.
 type Deployer interface {
-	Trigger() (queued bool)
+	Trigger() (queued bool, err error)
 }
 
 type deployResponse struct {
@@ -85,7 +85,13 @@ func Deploy(secret string, route config.Route, d Deployer) http.HandlerFunc {
 			return
 		}
 
-		if d.Trigger() {
+		queued, err := d.Trigger()
+		if err != nil {
+			log.Printf("rejected: path=%s error=%v", route.Path, err)
+			http.Error(w, "service unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		if queued {
 			log.Printf("queued: path=%s script=%s reason=deploy in progress", route.Path, route.Script)
 			writeJSON(w, http.StatusAccepted, deployResponse{Status: "queued"})
 			return

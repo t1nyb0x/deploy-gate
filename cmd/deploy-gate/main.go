@@ -1,15 +1,35 @@
 package main
 
 import (
+	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/t1nyb0x/deploy-gate/internal/config"
 	"github.com/t1nyb0x/deploy-gate/internal/deploy"
 	"github.com/t1nyb0x/deploy-gate/internal/webhook"
 )
+
+const defaultShutdownTimeout = 30 * time.Second
+
+func parseShutdownTimeout(value string) (time.Duration, error) {
+	if value == "" {
+		return defaultShutdownTimeout, nil
+	}
+	d, err := time.ParseDuration(value)
+	if err != nil {
+		return 0, fmt.Errorf("invalid duration %q: %w", value, err)
+	}
+	if d <= 0 {
+		return 0, fmt.Errorf("must be positive: %q", value)
+	}
+	return d, nil
+}
 
 func main() {
 	secret := os.Getenv("DEPLOY_SECRET")
@@ -21,6 +41,11 @@ func main() {
 
 	if configPath == "" {
 		log.Fatal("DEPLOY_CONFIG is required")
+	}
+
+	shutdownTimeout, err := parseShutdownTimeout(os.Getenv("DEPLOY_SHUTDOWN_TIMEOUT"))
+	if err != nil {
+		log.Fatalf("DEPLOY_SHUTDOWN_TIMEOUT: %v", err)
 	}
 
 	cfg, err := config.Load(configPath)
@@ -54,6 +79,37 @@ func main() {
 		WriteTimeout:      30 * time.Second,
 	}
 
-	log.Println("listening on :9000")
-	log.Fatal(server.ListenAndServe())
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	serveErr := make(chan error, 1)
+	go func() {
+		log.Println("listening on :9000")
+		serveErr <- server.ListenAndServe()
+	}()
+
+	select {
+	case err := <-serveErr:
+		log.Fatal(err)
+	case <-ctx.Done():
+	}
+	// Restore default signal handling so a second signal terminates immediately.
+	stop()
+
+	log.Printf("shutting down: timeout=%s", shutdownTimeout)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer cancel()
+
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		log.Printf("http server shutdown: %v", err)
+	}
+
+	// Serials share one deadline; once it passes, the remaining deploys are killed immediately.
+	for script, s := range serials {
+		if err := s.Shutdown(shutdownCtx); err != nil {
+			log.Printf("deploy shutdown: script=%s error=%v", script, err)
+		}
+	}
+
+	log.Println("shutdown complete")
 }

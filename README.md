@@ -52,6 +52,7 @@ Go is only required when building from source. Prebuilt binaries can be distribu
 | --------------- | -------- | ----------------------------------------------------- |
 | `DEPLOY_SECRET` | Yes      | GitHub Webhook secret used for signature verification |
 | `DEPLOY_CONFIG` | Yes      | Path to the JSON configuration file                   |
+| `DEPLOY_SHUTDOWN_TIMEOUT` | No | Max time to wait for running deploys on shutdown (Go duration, e.g. `2m`). Default: `30s` |
 
 Example:
 
@@ -123,6 +124,11 @@ Environment=DEPLOY_CONFIG=/etc/deploy-gate/config.json
 ExecStart=/usr/local/bin/deploy-gate
 Restart=always
 RestartSec=3
+# Send SIGTERM only to deploy-gate so it can wait for running deploys.
+# The default (control-group) would also terminate the deploy script immediately.
+KillMode=mixed
+# Keep this longer than DEPLOY_SHUTDOWN_TIMEOUT.
+TimeoutStopSec=60
 
 [Install]
 WantedBy=multi-user.target
@@ -160,6 +166,9 @@ services:
 
     ports:
       - "9000:9000"
+
+    # Keep this longer than DEPLOY_SHUTDOWN_TIMEOUT (Docker's default is 10s).
+    stop_grace_period: 60s
 ```
 
 Example config.json:
@@ -212,6 +221,19 @@ Responses:
 The script result is written to the server log, not returned in the response.
 
 Each script runs at most one at a time, even when several routes point to the same script. Requests that arrive while a deploy is running are coalesced into a single follow-up run, so the latest push is always deployed without piling up runs.
+
+## Graceful Shutdown
+
+On `SIGTERM` or `SIGINT`, `deploy-gate`:
+
+1. Stops accepting new webhook requests
+2. Drops any queued follow-up deploy (a warning is logged)
+3. Waits for running deploys to finish, up to `DEPLOY_SHUTDOWN_TIMEOUT`
+4. Kills deploys still running after the timeout, including their child processes
+
+Each script runs in its own process group, so its child processes (e.g. `docker compose`) are killed together.
+
+Make sure the process manager waits longer than `DEPLOY_SHUTDOWN_TIMEOUT` before force-killing (`TimeoutStopSec` for systemd, `stop_grace_period` for Docker Compose). With systemd, set `KillMode=mixed` as shown above.
 
 ## Project Structure
 
