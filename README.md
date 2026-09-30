@@ -53,6 +53,7 @@ Go is only required when building from source. Prebuilt binaries can be distribu
 | `DEPLOY_SECRET` | Yes      | GitHub Webhook secret used for signature verification |
 | `DEPLOY_CONFIG` | Yes      | Path to the JSON configuration file                   |
 | `DEPLOY_SHUTDOWN_TIMEOUT` | No | Max time to wait for running deploys on shutdown (Go duration, e.g. `2m`). Default: `30s` |
+| `DEPLOY_LOG_OUTPUT_BYTES` | No | Number of trailing bytes of script output written to the log. `0` disables output logging. Default: `4096` |
 
 Example:
 
@@ -219,6 +220,15 @@ Responses:
 | 403    | Invalid method or signature                                      |
 
 The script result is written to the server log, not returned in the response.
+
+### Script output and secrets
+
+- `DEPLOY_SECRET` is removed from the environment passed to scripts. Other environment variables are passed through
+- If the value of `DEPLOY_SECRET` appears in script output, it is replaced with `[REDACTED]`
+- Only the last `DEPLOY_LOG_OUTPUT_BYTES` bytes of output are kept. Truncation is marked as `[... N bytes truncated ...]`
+- Each output line is logged with a `[<script name>]` prefix
+
+Other secrets used by your scripts (tokens, passwords, etc.) are not redacted. Avoid printing them, and avoid `set -x` in scripts that handle them.
 
 Each script runs at most one at a time, even when several routes point to the same script. Requests that arrive while a deploy is running are coalesced into a single follow-up run, so the latest push is always deployed without piling up runs.
 
