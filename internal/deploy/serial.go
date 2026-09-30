@@ -95,10 +95,11 @@ func (s *Serial) loop() {
 
 	for {
 		output, err := s.run(s.ctx, s.script)
+		logOutput(s.script, output)
 		if err != nil {
-			log.Printf("deploy failed: script=%s error=%v output=%s", s.script, err, output)
+			log.Printf("deploy failed: script=%s error=%v", s.script, err)
 		} else {
-			log.Printf("deploy succeeded: script=%s output=%s", s.script, output)
+			log.Printf("deploy succeeded: script=%s", s.script)
 		}
 
 		s.mu.Lock()
