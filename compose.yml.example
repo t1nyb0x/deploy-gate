@@ -14,3 +14,6 @@ services:
 
     ports:
       - "9000:9000"
+
+    # Keep this longer than DEPLOY_SHUTDOWN_TIMEOUT (default 30s).
+    stop_grace_period: 60s

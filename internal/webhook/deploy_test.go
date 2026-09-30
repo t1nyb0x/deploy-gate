@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -24,11 +25,12 @@ func sign(body []byte) string {
 type fakeDeployer struct {
 	calls  int
 	queued bool
+	err    error
 }
 
-func (f *fakeDeployer) Trigger() bool {
+func (f *fakeDeployer) Trigger() (bool, error) {
 	f.calls++
-	return f.queued
+	return f.queued, f.err
 }
 
 func doRequest(t *testing.T, h http.HandlerFunc, method, event string, body []byte, sig string) (*httptest.ResponseRecorder, deployResponse) {
@@ -237,5 +239,17 @@ func TestDeployQueuedWhileRunning(t *testing.T) {
 	}
 	if d.calls != 1 {
 		t.Errorf("deploy triggered %d times, want 1", d.calls)
+	}
+}
+
+func TestDeployUnavailableWhenShuttingDown(t *testing.T) {
+	route := config.Route{Path: "/deploy/test", Script: "/scripts/test.sh", Branch: "main"}
+	body := []byte(`{"ref":"refs/heads/main"}`)
+	d := &fakeDeployer{err: errors.New("closed")}
+
+	res, _ := doRequest(t, Deploy(testSecret, route, d), http.MethodPost, "push", body, sign(body))
+
+	if res.Code != http.StatusServiceUnavailable {
+		t.Fatalf("code = %d, want %d", res.Code, http.StatusServiceUnavailable)
 	}
 }
