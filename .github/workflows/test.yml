@@ -1,0 +1,69 @@
+name: Test
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    env:
+      # Minimum statement coverage required for internal packages.
+      # cmd/ only wires components together and is covered by manual E2E checks.
+      COVERAGE_THRESHOLD: "80"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Check formatting
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "::error::The following files are not gofmt-formatted:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test -race -coverprofile=coverage.out ./...
+
+      - name: Check coverage
+        run: |
+          grep -E '^mode:|/internal/' coverage.out > coverage-internal.out
+
+          total="$(go tool cover -func=coverage.out | awk '/^total:/ { sub("%", "", $3); print $3 }')"
+          internal="$(go tool cover -func=coverage-internal.out | awk '/^total:/ { sub("%", "", $3); print $3 }')"
+
+          {
+            echo "## Coverage"
+            echo ""
+            echo "| Scope | Coverage |"
+            echo "| ----- | -------- |"
+            echo "| All packages | ${total}% |"
+            echo "| internal/... (threshold ${COVERAGE_THRESHOLD}%) | ${internal}% |"
+            echo ""
+            echo '```'
+            go tool cover -func=coverage.out
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if awk -v c="$internal" -v t="$COVERAGE_THRESHOLD" 'BEGIN { exit !(c < t) }'; then
+            echo "::error::internal/... coverage ${internal}% is below ${COVERAGE_THRESHOLD}%"
+            exit 1
+          fi
+          echo "internal/... coverage ${internal}% (threshold ${COVERAGE_THRESHOLD}%)"

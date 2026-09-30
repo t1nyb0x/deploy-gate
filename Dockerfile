@@ -1,4 +1,4 @@
-FROM golang:1.25-alpine AS builder
+FROM golang:1.27-alpine AS builder
 
 WORKDIR /app
 
@@ -14,9 +14,7 @@ RUN CGO_ENABLED=0 go build \
 
 FROM alpine:3.22
 
-RUN adduser -D -u 10001 app \
-    && mkdir -p /queue \
-    && chown -R app:app /queue
+RUN adduser -D -u 10001 app
 
 USER app
 

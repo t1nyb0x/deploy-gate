@@ -7,6 +7,8 @@ services:
     environment:
       DEPLOY_SECRET: ${DEPLOY_SECRET}
       DEPLOY_CONFIG: /etc/deploy-gate/config.json
+      DEPLOY_SHUTDOWN_TIMEOUT: ${DEPLOY_SHUTDOWN_TIMEOUT:-30s}
+      DEPLOY_LOG_OUTPUT_BYTES: ${DEPLOY_LOG_OUTPUT_BYTES:-4096}
 
     volumes:
       - ./config.json:/etc/deploy-gate/config.json:ro
@@ -14,3 +16,6 @@ services:
 
     ports:
       - "9000:9000"
+
+    # Keep this longer than DEPLOY_SHUTDOWN_TIMEOUT (default 30s).
+    stop_grace_period: 60s
