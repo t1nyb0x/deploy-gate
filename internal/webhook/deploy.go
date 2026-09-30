@@ -12,8 +12,11 @@ import (
 
 const maxBodySize = 1 << 20 // 1MB
 
-// Runner executes a deploy script and returns its combined output.
-type Runner func(script string) (string, error)
+// Deployer starts a deploy. Trigger reports whether the request was queued
+// behind a deploy already in progress.
+type Deployer interface {
+	Trigger() (queued bool)
+}
 
 type deployResponse struct {
 	Status string `json:"status"`
@@ -31,7 +34,7 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-func Deploy(secret string, route config.Route, run Runner) http.HandlerFunc {
+func Deploy(secret string, route config.Route, d Deployer) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "forbidden", http.StatusForbidden)
@@ -82,14 +85,11 @@ func Deploy(secret string, route config.Route, run Runner) http.HandlerFunc {
 			return
 		}
 
-		go func() {
-			output, err := run(route.Script)
-			if err != nil {
-				log.Printf("deploy failed: script=%s error=%v output=%s", route.Script, err, output)
-				return
-			}
-			log.Printf("deploy succeeded: script=%s output=%s", route.Script, output)
-		}()
+		if d.Trigger() {
+			log.Printf("queued: path=%s script=%s reason=deploy in progress", route.Path, route.Script)
+			writeJSON(w, http.StatusAccepted, deployResponse{Status: "queued"})
+			return
+		}
 
 		writeJSON(w, http.StatusAccepted, deployResponse{Status: "accepted"})
 	}
