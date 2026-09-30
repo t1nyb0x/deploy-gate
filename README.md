@@ -204,11 +204,14 @@ Responses:
 | Status | Description                                                      |
 | ------ | ---------------------------------------------------------------- |
 | 202    | Accepted; the script runs in the background (`{"status":"accepted"}`) |
+| 202    | A deploy of the same script is in progress; one follow-up run is queued (`{"status":"queued"}`) |
 | 200    | `ping` (`{"status":"pong"}`) or ignored event/branch (`{"status":"ignored"}`) |
 | 400    | Malformed push payload                                           |
 | 403    | Invalid method or signature                                      |
 
 The script result is written to the server log, not returned in the response.
+
+Each script runs at most one at a time, even when several routes point to the same script. Requests that arrive while a deploy is running are coalesced into a single follow-up run, so the latest push is always deployed without piling up runs.
 
 ## Project Structure
 

@@ -8,9 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"sync"
 	"testing"
-	"time"
 
 	"github.com/t1nyb0x/deploy-gate/internal/config"
 )
@@ -23,40 +21,14 @@ func sign(body []byte) string {
 	return "sha256=" + hex.EncodeToString(mac.Sum(nil))
 }
 
-type recorder struct {
-	mu    sync.Mutex
-	calls []string
-	done  chan struct{}
+type fakeDeployer struct {
+	calls  int
+	queued bool
 }
 
-func newRecorder() *recorder {
-	return &recorder{done: make(chan struct{}, 10)}
-}
-
-func (r *recorder) run(script string) (string, error) {
-	r.mu.Lock()
-	r.calls = append(r.calls, script)
-	r.mu.Unlock()
-	r.done <- struct{}{}
-	return "", nil
-}
-
-func (r *recorder) waitCalled(t *testing.T) {
-	t.Helper()
-	select {
-	case <-r.done:
-	case <-time.After(time.Second):
-		t.Fatal("expected deploy to run, but it did not")
-	}
-}
-
-func (r *recorder) assertNotCalled(t *testing.T) {
-	t.Helper()
-	select {
-	case <-r.done:
-		t.Fatal("expected deploy not to run, but it did")
-	case <-time.After(50 * time.Millisecond):
-	}
+func (f *fakeDeployer) Trigger() bool {
+	f.calls++
+	return f.queued
 }
 
 func doRequest(t *testing.T, h http.HandlerFunc, method, event string, body []byte, sig string) (*httptest.ResponseRecorder, deployResponse) {
@@ -227,8 +199,8 @@ func TestDeploy(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			rec := newRecorder()
-			h := Deploy(testSecret, tt.route, rec.run)
+			d := &fakeDeployer{}
+			h := Deploy(testSecret, tt.route, d)
 
 			res, resp := doRequest(t, h, tt.method, tt.event, tt.body, tt.sig)
 
@@ -239,16 +211,31 @@ func TestDeploy(t *testing.T) {
 				t.Errorf("status = %q, want %q", resp.Status, tt.wantStatus)
 			}
 
+			wantCalls := 0
 			if tt.wantDeploy {
-				rec.waitCalled(t)
-				rec.mu.Lock()
-				defer rec.mu.Unlock()
-				if len(rec.calls) != 1 || rec.calls[0] != tt.route.Script {
-					t.Errorf("calls = %v, want [%s]", rec.calls, tt.route.Script)
-				}
-			} else {
-				rec.assertNotCalled(t)
+				wantCalls = 1
+			}
+			if d.calls != wantCalls {
+				t.Errorf("deploy triggered %d times, want %d", d.calls, wantCalls)
 			}
 		})
+	}
+}
+
+func TestDeployQueuedWhileRunning(t *testing.T) {
+	route := config.Route{Path: "/deploy/test", Script: "/scripts/test.sh", Branch: "main"}
+	body := []byte(`{"ref":"refs/heads/main"}`)
+	d := &fakeDeployer{queued: true}
+
+	res, resp := doRequest(t, Deploy(testSecret, route, d), http.MethodPost, "push", body, sign(body))
+
+	if res.Code != http.StatusAccepted {
+		t.Fatalf("code = %d, want %d", res.Code, http.StatusAccepted)
+	}
+	if resp.Status != "queued" {
+		t.Errorf("status = %q, want %q", resp.Status, "queued")
+	}
+	if d.calls != 1 {
+		t.Errorf("deploy triggered %d times, want 1", d.calls)
 	}
 }
