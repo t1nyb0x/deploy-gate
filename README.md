@@ -69,11 +69,13 @@ Example:
   "routes": [
     {
       "path": "/deploy/bot",
-      "script": "/opt/deploy-gate/scripts/deploy-bot.sh"
+      "script": "/opt/deploy-gate/scripts/deploy-bot.sh",
+      "branch": "main"
     },
     {
       "path": "/deploy/dashboard",
-      "script": "/opt/deploy-gate/scripts/deploy-dashboard.sh"
+      "script": "/opt/deploy-gate/scripts/deploy-dashboard.sh",
+      "branch": "main"
     }
   ]
 }
@@ -82,6 +84,14 @@ Example:
 Each route maps an HTTP path to a local script.
 
 The script path must be an absolute path.
+
+| Field    | Required | Description                                                                                          |
+| -------- | -------- | ---------------------------------------------------------------------------------------------------- |
+| `path`   | Yes      | HTTP path to receive the webhook on. Must start with `/`                                              |
+| `script` | Yes      | Absolute path of the script to run                                                                   |
+| `branch` | No       | Only deploy on pushes to this branch (e.g. `main`). If omitted, pushes to any branch trigger a deploy |
+
+Setting `branch` is strongly recommended. Specify the branch name only (`main`, not `refs/heads/main`); a value starting with `refs/` is rejected at startup. Only `push` events trigger a deploy; `ping` and other events are acknowledged but ignored, and branch deletions are always ignored.
 
 ## Build
 
@@ -159,7 +169,8 @@ Example config.json:
   "routes": [
     {
       "path": "/deploy/example",
-      "script": "/scripts/deploy-example.sh"
+      "script": "/scripts/deploy-example.sh",
+      "branch": "main"
     }
   ]
 }
@@ -190,11 +201,14 @@ X-Hub-Signature-256: sha256=<signature>
 
 Responses:
 
-| Status | Description                  |
-| ------ | ---------------------------- |
-| 204    | Script executed successfully |
-| 403    | Invalid method or signature  |
-| 500    | Script execution failed      |
+| Status | Description                                                      |
+| ------ | ---------------------------------------------------------------- |
+| 202    | Accepted; the script runs in the background (`{"status":"accepted"}`) |
+| 200    | `ping` (`{"status":"pong"}`) or ignored event/branch (`{"status":"ignored"}`) |
+| 400    | Malformed push payload                                           |
+| 403    | Invalid method or signature                                      |
+
+The script result is written to the server log, not returned in the response.
 
 ## Project Structure
 

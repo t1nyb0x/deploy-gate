@@ -15,6 +15,8 @@ type Config struct {
 type Route struct {
 	Path   string `json:"path"`
 	Script string `json:"script"`
+	// Branch limits deploys to pushes on this branch. Empty accepts any branch.
+	Branch string `json:"branch,omitempty"`
 }
 
 func Load(path string) (*Config, error) {
@@ -50,6 +52,9 @@ func Load(path string) (*Config, error) {
 		}
 		if !filepath.IsAbs(route.Script) {
 			return nil, fmt.Errorf("route script must be absolute path: %s", route.Script)
+		}
+		if strings.HasPrefix(route.Branch, "refs/") {
+			return nil, fmt.Errorf("route branch must not start with refs/ (use the branch name only): %s", route.Path)
 		}
 		if _, ok := seen[route.Path]; ok {
 			return nil, fmt.Errorf("duplicate route path: %s", route.Path)
