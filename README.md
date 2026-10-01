@@ -153,6 +153,34 @@ TimeoutStopSec=60
 WantedBy=multi-user.target
 ```
 
+### Installing the binary
+
+Use `install` instead of `mv` or `cp` when placing or replacing the binary:
+
+```bash
+sudo install -o root -g root -m 755 deploy-gate /usr/local/bin/deploy-gate
+sudo systemctl restart deploy-gate
+```
+
+- Keep the binary owned by `root`. If it is owned by the service user (`User=`), a compromised deploy script could overwrite `deploy-gate` itself
+- `install` creates a new file, so it gets the SELinux label of the destination directory
+
+### SELinux (RHEL, Rocky Linux, AlmaLinux, etc.)
+
+`mv` keeps the SELinux label from the source directory. A binary extracted in a home directory and moved into `/usr/local/bin` keeps a label such as `user_home_t` or `admin_home_t`, and systemd fails to start it:
+
+```text
+deploy-gate.service: Failed to locate executable /usr/local/bin/deploy-gate: Permission denied
+```
+
+The binary runs fine from a shell, which makes this easy to miss. Check the label and restore it:
+
+```bash
+getenforce                                  # Enforcing means SELinux is active
+ls -Z /usr/local/bin/deploy-gate            # should be bin_t
+sudo restorecon -v /usr/local/bin/deploy-gate
+```
+
 ## Docker
 
 Docker can be used when the configured scripts can run inside the container.

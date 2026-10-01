@@ -153,6 +153,34 @@ TimeoutStopSec=60
 WantedBy=multi-user.target
 ```
 
+### バイナリの配置
+
+バイナリを配置・入れ替えるときは、`mv` や `cp` ではなく `install` を使ってください。
+
+```bash
+sudo install -o root -g root -m 755 deploy-gate /usr/local/bin/deploy-gate
+sudo systemctl restart deploy-gate
+```
+
+- バイナリの所有者は `root` にしてください。サービスを実行するユーザー（`User=`）が所有していると、デプロイスクリプトが乗っ取られた場合に `deploy-gate` 本体まで書き換えられてしまいます
+- `install` はファイルを新しく作成するため、配置先ディレクトリに合ったSELinuxラベルが付きます
+
+### SELinux（RHEL、Rocky Linux、AlmaLinuxなど）
+
+`mv` はSELinuxラベルを移動元のまま引き継ぎます。ホームディレクトリで展開したバイナリを `/usr/local/bin` に `mv` すると、`user_home_t` や `admin_home_t` のラベルが残り、systemdから起動できなくなります。
+
+```text
+deploy-gate.service: Failed to locate executable /usr/local/bin/deploy-gate: Permission denied
+```
+
+シェルから直接実行すると動くため、原因に気づきにくい点に注意してください。以下でラベルを確認し、元に戻します。
+
+```bash
+getenforce                                  # Enforcing ならSELinuxが有効
+ls -Z /usr/local/bin/deploy-gate            # bin_t になっていればOK
+sudo restorecon -v /usr/local/bin/deploy-gate
+```
+
 ## Docker
 
 設定したスクリプトがコンテナ内で完結する場合、Dockerで実行できます。
