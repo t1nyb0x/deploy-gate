@@ -45,7 +45,7 @@ GitHub Webhook
 - Linux
 - GitHub Webhook
 
-Go（1.27以上）はソースからビルドする場合のみ必要です。ビルド済みバイナリを使用する場合、実行環境にGoは不要です。
+Go（1.27.3以上）はソースからビルドする場合のみ必要です。ビルド済みバイナリを使用する場合、実行環境にGoは不要です。
 
 ## 設定
 
@@ -119,6 +119,12 @@ DEPLOY_CONFIG=/etc/deploy-gate/config.json
 go build -o bin/deploy-gate ./cmd/deploy-gate
 ```
 
+リリースのバイナリには、タグ名がバージョンとして埋め込まれます。自分で指定する場合は `-ldflags` を使います。指定しない場合、バージョンは `dev` になります。
+
+```bash
+go build -ldflags="-X main.version=v0.4.0" -o bin/deploy-gate ./cmd/deploy-gate
+```
+
 ## 実行
 
 ```bash
@@ -128,6 +134,18 @@ DEPLOY_CONFIG=/etc/deploy-gate/config.json \
 ```
 
 起動後は `:9000` で待ち受けます。
+
+起動ログの 1 行目に、動いているバージョンが出力されます。
+
+```text
+starting deploy-gate version=v0.4.0
+```
+
+サーバーを起動せずにバイナリのバージョンだけ確認するには、次のように実行します。
+
+```bash
+./bin/deploy-gate -version
+```
 
 ## systemd設定例
 

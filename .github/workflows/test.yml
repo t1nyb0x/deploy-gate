@@ -39,6 +39,13 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+      - name: Vulnerability check
+        # Scan with the toolchain from go.mod; otherwise go run switches to
+        # govulncheck's own minimum Go version and fails to load our packages.
+        env:
+          GOTOOLCHAIN: local
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+
       - name: Test
         run: go test -race -coverprofile=coverage.out ./...
 
