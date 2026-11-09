@@ -23,7 +23,7 @@ jobs:
         run: |
           mkdir -p dist
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
-            -ldflags="-s -w" \
+            -ldflags="-s -w -X main.version=${GITHUB_REF_NAME}" \
             -o dist/deploy-gate \
             ./cmd/deploy-gate
 

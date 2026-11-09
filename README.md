@@ -119,6 +119,12 @@ After saving, GitHub sends a `ping` event. A `200` response with `{"status":"pon
 go build -o bin/deploy-gate ./cmd/deploy-gate
 ```
 
+Release binaries embed the tag name as the version. To set one yourself, pass it with `-ldflags`; otherwise the version is `dev`.
+
+```bash
+go build -ldflags="-X main.version=v0.4.0" -o bin/deploy-gate ./cmd/deploy-gate
+```
+
 ## Run
 
 ```bash
@@ -128,6 +134,18 @@ DEPLOY_CONFIG=/etc/deploy-gate/config.json \
 ```
 
 The server listens on `:9000` by default.
+
+The first log line shows which version is running:
+
+```text
+starting deploy-gate version=v0.4.0
+```
+
+To check a binary without starting the server:
+
+```bash
+./bin/deploy-gate -version
+```
 
 ## systemd example
 
