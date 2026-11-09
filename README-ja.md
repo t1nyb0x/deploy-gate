@@ -119,15 +119,11 @@ DEPLOY_CONFIG=/etc/deploy-gate/config.json
 go build -o bin/deploy-gate ./cmd/deploy-gate
 ```
 
-バージョンを埋め込む場合は `-ldflags` で指定します。リリースのバイナリとイメージでは自動で埋め込まれます。
+リリースのバイナリには、タグ名がバージョンとして埋め込まれます。自分で指定する場合は `-ldflags` を使います。指定しない場合、バージョンは `dev` になります。
 
 ```bash
-go build \
-  -ldflags="-X main.version=v0.4.0 -X main.commit=$(git rev-parse HEAD)" \
-  -o bin/deploy-gate ./cmd/deploy-gate
+go build -ldflags="-X main.version=v0.4.0" -o bin/deploy-gate ./cmd/deploy-gate
 ```
-
-指定しない場合は、Go ツールチェーンが埋め込むビルド情報からバージョンとコミットを取得します。
 
 ## 実行
 
@@ -139,10 +135,10 @@ DEPLOY_CONFIG=/etc/deploy-gate/config.json \
 
 起動後は `:9000` で待ち受けます。
 
-起動ログの 1 行目に、動いているビルドのバージョンが出力されます。
+起動ログの 1 行目に、動いているバージョンが出力されます。
 
 ```text
-starting deploy-gate version=v0.4.0 commit=1572df49cd25 go=go1.27.3
+starting deploy-gate version=v0.4.0
 ```
 
 サーバーを起動せずにバイナリのバージョンだけ確認するには、次のように実行します。
@@ -328,8 +324,7 @@ deploy-gate/
 │   └── release.yml       # タグ作成時のリリースバイナリ作成
 ├── cmd/
 │   └── deploy-gate/
-│       ├── main.go       # 起動、シグナル処理、グレースフルシャットダウン
-│       └── version.go    # ビルドのバージョン情報
+│       └── main.go       # 起動、シグナル処理、グレースフルシャットダウン
 ├── internal/
 │   ├── config/
 │   │   └── config.go     # 設定ファイルの読み込みと検証

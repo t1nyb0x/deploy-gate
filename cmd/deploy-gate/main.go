@@ -17,6 +17,9 @@ import (
 	"github.com/t1nyb0x/deploy-gate/internal/webhook"
 )
 
+// Set at build time with -ldflags "-X main.version=v0.4.0".
+var version = "dev"
+
 const (
 	defaultShutdownTimeout = 30 * time.Second
 	defaultOutputLimit     = 4096
@@ -51,16 +54,15 @@ func parseShutdownTimeout(value string) (time.Duration, error) {
 }
 
 func main() {
-	showVersion := flag.Bool("version", false, "print version information and exit")
+	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
 
-	build := currentBuildInfo()
 	if *showVersion {
-		fmt.Println(build)
+		fmt.Println("deploy-gate", version)
 		return
 	}
 	// Log first so the running version is visible even if startup fails below.
-	log.Printf("starting %s", build)
+	log.Printf("starting deploy-gate version=%s", version)
 
 	secret := os.Getenv("DEPLOY_SECRET")
 	configPath := os.Getenv("DEPLOY_CONFIG")
