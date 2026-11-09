@@ -45,7 +45,7 @@ Actual deployment logic should be implemented in the script invoked by each rout
 - Linux
 - GitHub Webhooks
 
-Go 1.27 or later is only required when building from source. Prebuilt binaries can be distributed through GitHub Releases.
+Go 1.27.3 or later is only required when building from source. Prebuilt binaries can be distributed through GitHub Releases.
 
 ## Configuration
 
