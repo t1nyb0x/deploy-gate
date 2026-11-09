@@ -7,8 +7,12 @@ RUN go mod download
 
 COPY . .
 
+ARG VERSION=""
+ARG COMMIT=""
+
 RUN CGO_ENABLED=0 go build \
-    -ldflags="-s -w" \
+    -buildvcs=false \
+    -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT}" \
     -o deploy-gate \
     ./cmd/deploy-gate
 

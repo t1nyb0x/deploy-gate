@@ -119,6 +119,16 @@ After saving, GitHub sends a `ping` event. A `200` response with `{"status":"pon
 go build -o bin/deploy-gate ./cmd/deploy-gate
 ```
 
+To embed a version, pass it with `-ldflags`. Release binaries and images do this automatically.
+
+```bash
+go build \
+  -ldflags="-X main.version=v0.4.0 -X main.commit=$(git rev-parse HEAD)" \
+  -o bin/deploy-gate ./cmd/deploy-gate
+```
+
+Without it, the version and commit are taken from the build info the Go toolchain embeds.
+
 ## Run
 
 ```bash
@@ -128,6 +138,18 @@ DEPLOY_CONFIG=/etc/deploy-gate/config.json \
 ```
 
 The server listens on `:9000` by default.
+
+The first log line shows which build is running:
+
+```text
+starting deploy-gate version=v0.4.0 commit=1572df49cd25 go=go1.27.3
+```
+
+To check a binary without starting the server:
+
+```bash
+./bin/deploy-gate -version
+```
 
 ## systemd example
 
@@ -306,7 +328,8 @@ deploy-gate/
 │   └── release.yml       # Build release binary on tags
 ├── cmd/
 │   └── deploy-gate/
-│       └── main.go       # Startup, signal handling, graceful shutdown
+│       ├── main.go       # Startup, signal handling, graceful shutdown
+│       └── version.go    # Build version information
 ├── internal/
 │   ├── config/
 │   │   └── config.go     # Config file loading and validation

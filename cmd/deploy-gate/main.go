@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"log"
 	"net/http"
@@ -50,6 +51,17 @@ func parseShutdownTimeout(value string) (time.Duration, error) {
 }
 
 func main() {
+	showVersion := flag.Bool("version", false, "print version information and exit")
+	flag.Parse()
+
+	build := currentBuildInfo()
+	if *showVersion {
+		fmt.Println(build)
+		return
+	}
+	// Log first so the running version is visible even if startup fails below.
+	log.Printf("starting %s", build)
+
 	secret := os.Getenv("DEPLOY_SECRET")
 	configPath := os.Getenv("DEPLOY_CONFIG")
 
